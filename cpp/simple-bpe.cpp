@@ -2,7 +2,6 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
-#include <queue>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -25,25 +24,24 @@ class Token {
 class Tokenization {
     public:
         int count = 0;
-        // todo Token locality (vector)
         std::vector<Token> tokenization;
-        std::string_view word;
-        std::string w;
+        std::string_view wordView;
+        std::string word;
         Tokenization(const std::string& textWord) {
-            this->w = textWord + WORD_TERM_TOKEN;
-            tokenization.reserve(this->w.size()+1);
+            word = textWord + WORD_TERM_TOKEN;
+            tokenization.reserve(word.size()+1);
             tokenization.push_back(Token(0));
             for (size_t i = 1; i < textWord.size(); ++i) {
                 tokenization.push_back(Token(i));
             }
-            // handle length 2 WORD_TERM_TOKEN
+            // handle WORD_TERM_TOKEN
             tokenization.push_back(Token(textWord.size()));
-            tokenization.back().end = this->w.size();
+            tokenization.back().end = word.size();
             tokenization.back().next = tokenization.size() + 1;
         }
 
         void populateStringView() {
-            this->word = std::string_view(this->w);
+            wordView = std::string_view(word);
         }
 };
 
@@ -59,7 +57,7 @@ void initializeCorpus(std::ifstream& trainingData, std::unordered_map<std::strin
                 std::string word = std::string(i, j);
                 if (corpus.find(word) == corpus.end()) {
                     corpus.insert({word, Tokenization(word)});
-                    corpus.find(word)->second.populateStringView(); // need copy constructor
+                    corpus.find(word)->second.populateStringView(); // needed until copy constructor
                 }
                 ++corpus.find(word)->second.count;
                 i = j;
@@ -76,7 +74,7 @@ std::string findMostFreqTokenPair(const std::unordered_map<std::string, Tokeniza
             const auto& token = word.second.tokenization[i];
             const size_t& start = token.start;
             const size_t& end = word.second.tokenization[token.next].end;
-            pairCount[word.second.word.substr(start, end - start)] += word.second.count;
+            pairCount[word.second.wordView.substr(start, end - start)] += word.second.count;
         }
     }
     int maxFreqCount = 0;
@@ -96,7 +94,7 @@ void updateCorpus(std::unordered_map<std::string, Tokenization>& corpus, const s
             auto& token = word.second.tokenization[i];
             const size_t start = word.second.tokenization[i].start;
             const size_t end = word.second.tokenization[word.second.tokenization[i].next].end;
-            if (word.second.word.substr(start, end - start) == maxFreqToken) {
+            if (word.second.wordView.substr(start, end - start) == maxFreqToken) {
                 word.second.tokenization[i].end = word.second.tokenization[token.next].end;
                 size_t next = word.second.tokenization[token.next].next;
                 word.second.tokenization[token.next].next = word.second.tokenization.size() + 1;
