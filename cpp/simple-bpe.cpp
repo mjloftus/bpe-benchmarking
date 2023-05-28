@@ -2,6 +2,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <queue>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -9,15 +10,41 @@
 
 std::string WORD_TERM_TOKEN = "\\w";
 
+class Token {
+    public:
+        size_t start;
+        size_t end;
+        Token* next;
+        Token(int val) {
+            start = val;
+            end = val + 1;
+            next = nullptr;
+        }
+};
+
 class Tokenization {
     public:
         int count = 0;
-        std::vector<std::string> tokenization;
-        Tokenization(std::string word) {
-            for (auto c : word) {
-                tokenization.push_back(std::string(1, c));
+        Token* head;
+        std::string_view word;
+        std::string w;
+        Tokenization(std::string textWord) {
+            this->w = textWord + WORD_TERM_TOKEN;
+            this->word = std::string_view(this->w);
+            head = new Token(0);
+            Token* cur = head;
+            for (size_t i = 1; i < textWord.size(); ++i) {
+                cur->next = new Token(i);
+                cur = cur->next;
             }
-            tokenization.push_back(WORD_TERM_TOKEN);
+            // handle length 2 WORD_TERM_TOKEN
+            cur->next = new Token(textWord.size());
+            ++cur->next->end;
+            // std::cout << this->word << '\n';
+        }
+
+        void populateStringView() {
+            this->word = std::string_view(this->w);
         }
 };
 
@@ -31,7 +58,10 @@ void initializeCorpus(std::ifstream& trainingData, std::unordered_map<std::strin
                 auto j = i + 1;
                 while (j != line.end() && *j != ' ') ++j;
                 std::string word = std::string(i, j);
-                if (corpus.find(word) == corpus.end()) corpus.insert({word, Tokenization(word)});
+                if (corpus.find(word) == corpus.end()) {
+                    corpus.insert({word, Tokenization(word)});
+                    corpus.find(word)->second.populateStringView(); // need copy constructor
+                }
                 ++corpus.find(word)->second.count;
                 i = j;
             }
@@ -43,8 +73,12 @@ std::string findMostFreqTokenPair(const std::unordered_map<std::string, Tokeniza
     std::unordered_map<std::string, int> pairCount;
     pairCount.reserve(10000);
     for (const auto &word : corpus) {
-        for (size_t i = 0; i < word.second.tokenization.size() - 1; ++i) {
-            pairCount[word.second.tokenization[i] + word.second.tokenization[i+1]] += word.second.count;
+        // std::cout << word.first << ' ' << word.second.w << ' ' << word.second.word << '\n';
+        for (auto i = word.second.head; i->next != nullptr; i = i->next) {
+            // std::cout << i->start << ' ' << i->next->end << '\n';
+            // std::cout << word.second.word.substr(i->start, i->next->end - i->start) << '\n';
+            std::string s(word.second.word.substr(i->start, i->next->end - i->start));
+            pairCount[s] += word.second.count;
         }
     }
     int maxFreqCount = 0;
@@ -60,18 +94,14 @@ std::string findMostFreqTokenPair(const std::unordered_map<std::string, Tokeniza
 
 void updateCorpus(std::unordered_map<std::string, Tokenization>& corpus, const std::string& maxFreqToken) {
     for (auto &word : corpus) {
-        const size_t tokenizationSize = word.second.tokenization.size();
-        if (tokenizationSize < 2) continue;
-        std::vector<std::string> newTokenization;
-        newTokenization.reserve(tokenizationSize);
-        for (size_t i = 0; i < tokenizationSize; ++i) {
-            if (i < tokenizationSize - 1 && word.second.tokenization[i] + word.second.tokenization[i+1] == maxFreqToken) {
-                newTokenization.push_back(maxFreqToken);
-                ++i;
+        for (auto i = word.second.head; i != nullptr && i->next != nullptr; i = i->next) {
+            if (word.second.word.substr(i->start, i->next->end - i->start) == maxFreqToken) {
+                i->end = i->next->end;
+                Token* toDelete = i->next;
+                i->next = i->next->next;
+                delete toDelete;
             }
-            else newTokenization.push_back(word.second.tokenization[i]);
         }
-        word.second.tokenization = newTokenization;
     }
 }
 

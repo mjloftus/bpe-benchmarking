@@ -1,5 +1,5 @@
 CXX=g++
-CXXFLAGS=-std=c++11 -g -O3 -pedantic-errors -Wall -Wextra -Werror
+CXXFLAGS=-std=c++17 -g -O3 -pedantic-errors -Wall -Wextra -Werror
 TARGET=simple-bpe
 
 ifdef ComSpec
