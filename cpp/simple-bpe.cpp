@@ -14,31 +14,32 @@ class Token {
     public:
         size_t start;
         size_t end;
-        Token* next;
-        Token(int val) {
+        size_t next;
+        Token(size_t val) {
             start = val;
             end = val + 1;
-            next = nullptr;
+            next = end;
         }
 };
 
 class Tokenization {
     public:
         int count = 0;
-        Token* head;
+        // todo Token locality (vector)
+        std::vector<Token> tokenization;
         std::string_view word;
         std::string w;
         Tokenization(const std::string& textWord) {
             this->w = textWord + WORD_TERM_TOKEN;
-            head = new Token(0);
-            Token* cur = head;
+            tokenization.reserve(this->w.size()+1);
+            tokenization.push_back(Token(0));
             for (size_t i = 1; i < textWord.size(); ++i) {
-                cur->next = new Token(i);
-                cur = cur->next;
+                tokenization.push_back(Token(i));
             }
             // handle length 2 WORD_TERM_TOKEN
-            cur->next = new Token(textWord.size());
-            ++cur->next->end;
+            tokenization.push_back(Token(textWord.size()));
+            tokenization.back().end = this->w.size();
+            tokenization.back().next = tokenization.size() + 1;
         }
 
         void populateStringView() {
@@ -71,8 +72,11 @@ std::string findMostFreqTokenPair(const std::unordered_map<std::string, Tokeniza
     std::unordered_map<std::string_view, int> pairCount;
     pairCount.reserve(10000);
     for (const auto &word : corpus) {
-        for (auto i = word.second.head; i->next != nullptr; i = i->next) {
-            pairCount[word.second.word.substr(i->start, i->next->end - i->start)] += word.second.count;
+        for (size_t i = 0; word.second.tokenization[i].next < word.second.tokenization.size(); i = word.second.tokenization[i].next) {
+            const auto& token = word.second.tokenization[i];
+            const size_t& start = token.start;
+            const size_t& end = word.second.tokenization[token.next].end;
+            pairCount[word.second.word.substr(start, end - start)] += word.second.count;
         }
     }
     int maxFreqCount = 0;
@@ -88,12 +92,15 @@ std::string findMostFreqTokenPair(const std::unordered_map<std::string, Tokeniza
 
 void updateCorpus(std::unordered_map<std::string, Tokenization>& corpus, const std::string& maxFreqToken) {
     for (auto &word : corpus) {
-        for (auto i = word.second.head; i != nullptr && i->next != nullptr; i = i->next) {
-            if (word.second.word.substr(i->start, i->next->end - i->start) == maxFreqToken) {
-                i->end = i->next->end;
-                Token* toDelete = i->next;
-                i->next = i->next->next;
-                delete toDelete;
+        for (size_t i = 0; i < word.second.tokenization.size() && word.second.tokenization[i].next < word.second.tokenization.size(); i = word.second.tokenization[i].next) {
+            auto& token = word.second.tokenization[i];
+            const size_t start = word.second.tokenization[i].start;
+            const size_t end = word.second.tokenization[word.second.tokenization[i].next].end;
+            if (word.second.word.substr(start, end - start) == maxFreqToken) {
+                word.second.tokenization[i].end = word.second.tokenization[token.next].end;
+                size_t next = word.second.tokenization[token.next].next;
+                word.second.tokenization[token.next].next = word.second.tokenization.size() + 1;
+                word.second.tokenization[i].next = next;
             }
         }
     }
