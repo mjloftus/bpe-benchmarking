@@ -1,8 +1,10 @@
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -45,7 +47,7 @@ class Tokenization {
         }
 };
 
-void initializeCorpus(std::ifstream& trainingData, std::unordered_map<std::string, Tokenization>& corpus) {
+void initializeCorpus(std::ifstream& trainingData, std::unordered_map<std::string, Tokenization>& corpusToTokenization, std::vector<std::string>& corpus) {
     std::string line;
     while (getline(trainingData, line)) {
         auto i = line.begin();
@@ -55,11 +57,12 @@ void initializeCorpus(std::ifstream& trainingData, std::unordered_map<std::strin
                 auto j = i + 1;
                 while (j != line.end() && *j != ' ') ++j;
                 std::string word = std::string(i, j);
-                if (corpus.find(word) == corpus.end()) {
-                    corpus.insert({word, Tokenization(word)});
-                    corpus.find(word)->second.populateStringView(); // needed until copy constructor
+                if (corpusToTokenization.find(word) == corpusToTokenization.end()) {
+                    corpusToTokenization.insert({word, Tokenization(word)});
+                    corpusToTokenization.find(word)->second.populateStringView(); // needed until copy constructor
+                    corpus.push_back(word);
                 }
-                ++corpus.find(word)->second.count;
+                ++corpusToTokenization.find(word)->second.count;
                 i = j;
             }
         }
@@ -88,8 +91,9 @@ std::string findMostFreqTokenPair(const std::unordered_map<std::string, Tokeniza
     return maxFreqToken;
 }
 
-void updateCorpus(std::unordered_map<std::string, Tokenization>& corpus, const std::string& maxFreqToken) {
-    for (auto &word : corpus) {
+void updateCorpus(std::unordered_map<std::string, Tokenization>& corpusToTokenization, const std::vector<std::string>& corpus, const std::string& maxFreqToken, const std::pair<size_t, size_t> indices) {
+    for (size_t wordInd = indices.first; wordInd < indices.second; ++wordInd) {
+        auto& word = *corpusToTokenization.find(corpus[wordInd]);
         for (size_t i = 0; i < word.second.tokenization.size() && word.second.tokenization[i].next < word.second.tokenization.size(); i = word.second.tokenization[i].next) {
             auto& token = word.second.tokenization[i];
             const size_t start = word.second.tokenization[i].start;
@@ -108,14 +112,18 @@ int main(int argc, char* argv[]) {
     auto begin = std::chrono::high_resolution_clock::now();
     // cmd line args
     int iterations = 10;
+    size_t threadCount = 1;
     std::ifstream trainingData;
     std::ofstream outputFile;
 
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "-k") && i < argc - 1) iterations = atoi(argv[++i]);
+        if (!strcmp(argv[i], "-j") && i < argc - 1) threadCount = atoi(argv[++i]);
         if (!strcmp(argv[i], "-i") && i < argc - 1) trainingData.open(argv[++i]);
         if (!strcmp(argv[i], "-o") && i < argc - 1) outputFile.open(argv[++i]);
     }
+
+    if (threadCount < 1) threadCount = 1;
 
     if (!trainingData.is_open()) {
         std::cout << "no input file found\n";
@@ -124,18 +132,30 @@ int main(int argc, char* argv[]) {
 
     // init corpus
     std::string line;
-    std::unordered_map<std::string, Tokenization> corpus;
+    std::unordered_map<std::string, Tokenization> corpusToTokenization;
+    std::vector<std::string> corpus;
     std::unordered_set<std::string> vocab;
     
-    initializeCorpus(trainingData, corpus);
+    initializeCorpus(trainingData, corpusToTokenization, corpus);
     trainingData.close();
 
     // perform bpe
     for (int i = 0; i < iterations; ++i) {
-        std::string maxFreqToken = findMostFreqTokenPair(corpus);
+        std::string maxFreqToken = findMostFreqTokenPair(corpusToTokenization);
         if (maxFreqToken == "") break;
         vocab.insert(maxFreqToken);
-        updateCorpus(corpus, maxFreqToken);
+        if (threadCount == 1) updateCorpus(corpusToTokenization, corpus, maxFreqToken, {0, corpus.size()});
+        else {
+            std::vector<std::thread> threadPool;
+            size_t intervalSize = corpus.size() / threadCount;
+            for (size_t j = 0; j < threadCount - 1; ++j) {
+                std::pair<size_t, size_t> indices({j * intervalSize, (j+1) * intervalSize});
+                threadPool.push_back(std::thread(updateCorpus, std::ref(corpusToTokenization), std::cref(corpus), std::cref(maxFreqToken), indices));
+            }
+            std::pair<size_t, size_t> indices({(threadCount-1) * intervalSize, corpus.size()});
+            threadPool.push_back(std::thread(updateCorpus, std::ref(corpusToTokenization), std::ref(corpus), std::ref(maxFreqToken), indices));
+            for (size_t j = 0; j < threadPool.size(); ++j) threadPool[j].join();
+        }
     }
     auto end = std::chrono::high_resolution_clock::now();
 
